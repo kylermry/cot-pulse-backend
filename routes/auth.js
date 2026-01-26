@@ -6,7 +6,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const TwilioService = require('../utils/twilio');
 
 const router = express.Router();
 
@@ -41,23 +40,8 @@ function authenticateToken(req, res, next) {
 
         req.userId = decoded.userId;
         req.userEmail = decoded.email;
-        req.phoneVerified = decoded.phoneVerified;
         next();
     });
-}
-
-/**
- * Require phone verification middleware
- */
-function requirePhoneVerification(req, res, next) {
-    if (!req.phoneVerified) {
-        return res.status(403).json({
-            success: false,
-            error: 'Phone verification required',
-            code: 'PHONE_NOT_VERIFIED'
-        });
-    }
-    next();
 }
 
 // ============================================
@@ -66,11 +50,11 @@ function requirePhoneVerification(req, res, next) {
 
 /**
  * POST /api/auth/signup
- * Create new user account and send verification code
+ * Create new user account
  */
 router.post('/signup', async (req, res) => {
     try {
-        const { email, password, name, phone } = req.body;
+        const { email, password, name } = req.body;
 
         // Validation
         if (!email || !password) {
@@ -99,23 +83,11 @@ router.post('/signup', async (req, res) => {
         const user = await User.create({ email, password, name });
         console.log(`[Auth] User created: ${user.email}`);
 
-        // Phone verification is optional - try if phone provided and Twilio configured
-        let userPhone = null;
-        if (phone && process.env.TWILIO_VERIFY_SERVICE_SID && !process.env.TWILIO_VERIFY_SERVICE_SID.includes('REPLACE')) {
-            try {
-                const verificationResult = await TwilioService.sendVerificationCode(user.id, phone);
-                userPhone = verificationResult.phone;
-            } catch (twilioError) {
-                console.log('[Auth] Twilio not configured, skipping phone verification');
-            }
-        }
-
         // Generate JWT
         const token = jwt.sign(
             {
                 userId: user.id,
-                email: user.email,
-                phoneVerified: false
+                email: user.email
             },
             JWT_SECRET,
             { expiresIn: JWT_EXPIRATION }
@@ -128,11 +100,8 @@ router.post('/signup', async (req, res) => {
             user: {
                 id: user.id,
                 email: user.email,
-                name: user.name,
-                phone: userPhone,
-                phoneVerified: false
-            },
-            needsPhoneVerification: !!phone
+                name: user.name
+            }
         });
 
     } catch (error) {
@@ -188,8 +157,7 @@ router.post('/login', async (req, res) => {
         const token = jwt.sign(
             {
                 userId: user.id,
-                email: user.email,
-                phoneVerified: user.phone_verified
+                email: user.email
             },
             JWT_SECRET,
             { expiresIn: JWT_EXPIRATION }
@@ -204,11 +172,8 @@ router.post('/login', async (req, res) => {
                 id: user.id,
                 email: user.email,
                 name: user.name,
-                phone: user.phone,
-                phoneVerified: user.phone_verified,
                 subscriptionTier: user.subscription_tier
-            },
-            needsPhoneVerification: !user.phone_verified
+            }
         });
 
     } catch (error) {
@@ -216,172 +181,6 @@ router.post('/login', async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Login failed. Please try again.'
-        });
-    }
-});
-
-/**
- * POST /api/auth/verify-phone
- * Verify phone number with code from SMS
- */
-router.post('/verify-phone', authenticateToken, async (req, res) => {
-    try {
-        const { code } = req.body;
-
-        if (!code || code.length !== 6) {
-            return res.status(400).json({
-                success: false,
-                error: 'Please enter a valid 6-digit code'
-            });
-        }
-
-        const user = await User.findById(req.userId);
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: 'User not found'
-            });
-        }
-
-        if (!user.phone) {
-            return res.status(400).json({
-                success: false,
-                error: 'No phone number found. Please add a phone number first.'
-            });
-        }
-
-        if (user.phone_verified) {
-            return res.status(400).json({
-                success: false,
-                error: 'Phone number is already verified'
-            });
-        }
-
-        const verificationResult = await TwilioService.verifyCode(
-            req.userId,
-            user.phone,
-            code
-        );
-
-        if (verificationResult.verified) {
-            // Generate new token with phoneVerified = true
-            const newToken = jwt.sign(
-                {
-                    userId: user.id,
-                    email: user.email,
-                    phoneVerified: true
-                },
-                JWT_SECRET,
-                { expiresIn: JWT_EXPIRATION }
-            );
-
-            console.log(`[Auth] Phone verified for: ${user.email}`);
-
-            res.json({
-                success: true,
-                message: 'Phone verified successfully!',
-                token: newToken,
-                user: {
-                    id: user.id,
-                    email: user.email,
-                    name: user.name,
-                    phone: user.phone,
-                    phoneVerified: true,
-                    subscriptionTier: user.subscription_tier
-                }
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: verificationResult.message || 'Invalid verification code'
-            });
-        }
-
-    } catch (error) {
-        console.error('[Auth] Phone verification error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Verification failed'
-        });
-    }
-});
-
-/**
- * POST /api/auth/resend-code
- * Resend verification code to phone
- */
-router.post('/resend-code', authenticateToken, async (req, res) => {
-    try {
-        const user = await User.findById(req.userId);
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: 'User not found'
-            });
-        }
-
-        if (!user.phone) {
-            return res.status(400).json({
-                success: false,
-                error: 'No phone number found'
-            });
-        }
-
-        if (user.phone_verified) {
-            return res.status(400).json({
-                success: false,
-                error: 'Phone is already verified'
-            });
-        }
-
-        await TwilioService.sendVerificationCode(user.id, user.phone);
-
-        console.log(`[Auth] Verification code resent to: ${user.phone}`);
-
-        res.json({
-            success: true,
-            message: 'Verification code sent!'
-        });
-
-    } catch (error) {
-        console.error('[Auth] Resend code error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to resend code'
-        });
-    }
-});
-
-/**
- * POST /api/auth/update-phone
- * Update phone number and send new verification code
- */
-router.post('/update-phone', authenticateToken, async (req, res) => {
-    try {
-        const { phone } = req.body;
-
-        if (!phone) {
-            return res.status(400).json({
-                success: false,
-                error: 'Phone number is required'
-            });
-        }
-
-        const verificationResult = await TwilioService.sendVerificationCode(req.userId, phone);
-
-        res.json({
-            success: true,
-            message: 'Verification code sent to new number!',
-            phone: verificationResult.phone
-        });
-
-    } catch (error) {
-        console.error('[Auth] Update phone error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message || 'Failed to update phone number'
         });
     }
 });
@@ -407,8 +206,6 @@ router.get('/me', authenticateToken, async (req, res) => {
                 id: user.id,
                 email: user.email,
                 name: user.name,
-                phone: user.phone,
-                phoneVerified: user.phone_verified,
                 subscriptionTier: user.subscription_tier,
                 subscriptionStatus: user.subscription_status,
                 createdAt: user.created_at,
@@ -430,8 +227,6 @@ router.get('/me', authenticateToken, async (req, res) => {
  * Logout user (client-side token removal, server just confirms)
  */
 router.post('/logout', authenticateToken, (req, res) => {
-    // In a stateless JWT setup, logout is handled client-side
-    // This endpoint just confirms the logout action
     console.log(`[Auth] User logged out: ${req.userEmail}`);
 
     res.json({
@@ -443,4 +238,3 @@ router.post('/logout', authenticateToken, (req, res) => {
 // Export router and middleware
 module.exports = router;
 module.exports.authenticateToken = authenticateToken;
-module.exports.requirePhoneVerification = requirePhoneVerification;
