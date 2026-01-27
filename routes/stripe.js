@@ -31,9 +31,14 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
         const userId = req.userId;
         const userEmail = req.userEmail;
 
+        console.log(`[Stripe] Creating checkout session for userId: ${userId}, email: ${userEmail}`);
+
         // Get user details
         const user = await User.findById(userId);
+        console.log(`[Stripe] User found:`, user ? 'yes' : 'no');
+
         if (!user) {
+            console.log(`[Stripe] User not found in database for userId: ${userId}`);
             return res.status(404).json({
                 success: false,
                 error: 'User not found'

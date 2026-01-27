@@ -52,7 +52,8 @@ class User {
     static async findById(userId) {
         return db.get(`
             SELECT id, email, name, phone, phone_verified, email_verified,
-                   subscription_tier, subscription_status, created_at, last_login
+                   subscription_tier, subscription_status, stripe_customer_id,
+                   created_at, last_login
             FROM users WHERE id = ?
         `, [userId]);
     }
