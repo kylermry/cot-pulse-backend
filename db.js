@@ -1,25 +1,72 @@
 /**
- * SQLite Database Connection (sql.js)
+ * Database Connection (PostgreSQL + SQLite fallback)
  * COT Pulse Backend
+ *
+ * Uses PostgreSQL when DATABASE_URL is available (Railway)
+ * Falls back to SQLite for local development
  */
 
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-// Database file path
+// Determine which database to use
+const USE_POSTGRES = !!process.env.DATABASE_URL;
+
+// PostgreSQL connection pool
+let pgPool = null;
+
+// SQLite database (for local dev)
+let sqliteDb = null;
+let SQL = null;
+
+// Database file path for SQLite
 const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'cotpulse.db');
 
-let db = null;
-let SQL = null;
-
 /**
- * Initialize the database
+ * Initialize the database connection
  */
 async function initDatabase() {
-    if (db) return db;
+    if (USE_POSTGRES) {
+        return initPostgres();
+    } else {
+        return initSqlite();
+    }
+}
+
+/**
+ * Initialize PostgreSQL connection
+ */
+async function initPostgres() {
+    if (pgPool) return pgPool;
+
+    pgPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    });
+
+    // Test connection
+    try {
+        const client = await pgPool.connect();
+        console.log('[Database] Connected to PostgreSQL');
+        client.release();
+    } catch (error) {
+        console.error('[Database] PostgreSQL connection failed:', error.message);
+        throw error;
+    }
+
+    return pgPool;
+}
+
+/**
+ * Initialize SQLite connection (local development)
+ */
+async function initSqlite() {
+    if (sqliteDb) return sqliteDb;
+
+    const initSqlJs = require('sql.js');
 
     // Ensure data directory exists
     if (!fs.existsSync(dataDir)) {
@@ -32,85 +79,90 @@ async function initDatabase() {
     // Load existing database or create new one
     if (fs.existsSync(dbPath)) {
         const fileBuffer = fs.readFileSync(dbPath);
-        db = new SQL.Database(fileBuffer);
-        console.log(`[Database] Loaded existing database: ${dbPath}`);
+        sqliteDb = new SQL.Database(fileBuffer);
+        console.log(`[Database] Loaded SQLite database: ${dbPath}`);
     } else {
-        db = new SQL.Database();
-        console.log(`[Database] Created new database: ${dbPath}`);
+        sqliteDb = new SQL.Database();
+        console.log(`[Database] Created new SQLite database: ${dbPath}`);
     }
 
-    return db;
+    return sqliteDb;
 }
 
 /**
- * Save database to file
+ * Save SQLite database to file
  */
-function saveDatabase() {
-    if (!db) return;
-    const data = db.export();
+function saveSqlite() {
+    if (!sqliteDb || USE_POSTGRES) return;
+    const data = sqliteDb.export();
     const buffer = Buffer.from(data);
     fs.writeFileSync(dbPath, buffer);
 }
 
 /**
- * Get the database instance
- */
-function getDb() {
-    if (!db) {
-        throw new Error('Database not initialized. Call initDatabase() first.');
-    }
-    return db;
-}
-
-/**
  * Run a query that modifies data (INSERT, UPDATE, DELETE)
+ * Returns the result for PostgreSQL or undefined for SQLite
  */
-function run(sql, params = []) {
-    const database = getDb();
-    database.run(sql, params);
-    saveDatabase();
+async function run(sql, params = []) {
+    if (USE_POSTGRES) {
+        const result = await pgPool.query(sql, params);
+        return result;
+    } else {
+        sqliteDb.run(sql, params);
+        saveSqlite();
+        return undefined;
+    }
 }
 
 /**
  * Get a single row
  */
-function get(sql, params = []) {
-    const database = getDb();
-    const stmt = database.prepare(sql);
-    stmt.bind(params);
-
-    if (stmt.step()) {
-        const row = stmt.getAsObject();
+async function get(sql, params = []) {
+    if (USE_POSTGRES) {
+        const result = await pgPool.query(sql, params);
+        return result.rows[0];
+    } else {
+        const stmt = sqliteDb.prepare(sql);
+        stmt.bind(params);
+        if (stmt.step()) {
+            const row = stmt.getAsObject();
+            stmt.free();
+            return row;
+        }
         stmt.free();
-        return row;
+        return undefined;
     }
-    stmt.free();
-    return undefined;
 }
 
 /**
  * Get all rows
  */
-function all(sql, params = []) {
-    const database = getDb();
-    const stmt = database.prepare(sql);
-    stmt.bind(params);
-
-    const rows = [];
-    while (stmt.step()) {
-        rows.push(stmt.getAsObject());
+async function all(sql, params = []) {
+    if (USE_POSTGRES) {
+        const result = await pgPool.query(sql, params);
+        return result.rows;
+    } else {
+        const stmt = sqliteDb.prepare(sql);
+        stmt.bind(params);
+        const rows = [];
+        while (stmt.step()) {
+            rows.push(stmt.getAsObject());
+        }
+        stmt.free();
+        return rows;
     }
-    stmt.free();
-    return rows;
 }
 
 /**
  * Execute raw SQL (for schema changes)
  */
-function exec(sql) {
-    const database = getDb();
-    database.exec(sql);
-    saveDatabase();
+async function exec(sql) {
+    if (USE_POSTGRES) {
+        await pgPool.query(sql);
+    } else {
+        sqliteDb.exec(sql);
+        saveSqlite();
+    }
 }
 
 /**
@@ -119,8 +171,13 @@ function exec(sql) {
 async function testConnection() {
     try {
         await initDatabase();
-        const result = get('SELECT 1 as test');
-        console.log(`[Database] Connection test successful`);
+        if (USE_POSTGRES) {
+            const result = await pgPool.query('SELECT 1 as test');
+            console.log('[Database] PostgreSQL connection test successful');
+        } else {
+            const result = get('SELECT 1 as test');
+            console.log('[Database] SQLite connection test successful');
+        }
         return true;
     } catch (error) {
         console.error('[Database] Connection test failed:', error.message);
@@ -131,21 +188,124 @@ async function testConnection() {
 /**
  * Check if database has been initialized with tables
  */
-function isInitialized() {
+async function isInitialized() {
     try {
-        const result = get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
-        return !!result;
+        if (USE_POSTGRES) {
+            const result = await pgPool.query(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')"
+            );
+            return result.rows[0].exists;
+        } else {
+            const result = get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
+            return !!result;
+        }
     } catch (error) {
         return false;
     }
 }
 
 /**
- * Auto-setup database tables (for Railway deployment)
+ * Setup database tables
  */
-function setupTables() {
+async function setupTables() {
     console.log('[Database] Setting up tables...');
 
+    if (USE_POSTGRES) {
+        await setupPostgresTables();
+    } else {
+        await setupSqliteTables();
+    }
+
+    console.log('[Database] Tables created successfully');
+}
+
+/**
+ * PostgreSQL table setup
+ */
+async function setupPostgresTables() {
+    // Users table
+    await exec(`
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            name TEXT,
+            phone TEXT,
+            phone_verified INTEGER DEFAULT 0,
+            email_verified INTEGER DEFAULT 0,
+            subscription_tier TEXT DEFAULT 'free',
+            subscription_status TEXT DEFAULT 'active',
+            stripe_customer_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP
+        )
+    `);
+
+    // Phone verification attempts table
+    await exec(`
+        CREATE TABLE IF NOT EXISTS phone_verification_attempts (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            phone TEXT NOT NULL,
+            code TEXT,
+            verified INTEGER DEFAULT 0,
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // User watchlist table
+    await exec(`
+        CREATE TABLE IF NOT EXISTS user_watchlist (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL,
+            name TEXT,
+            category TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, symbol)
+        )
+    `);
+
+    // User alerts table
+    await exec(`
+        CREATE TABLE IF NOT EXISTS user_alerts (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL,
+            alert_type TEXT NOT NULL,
+            threshold_value REAL,
+            threshold_direction TEXT,
+            is_active INTEGER DEFAULT 1,
+            last_triggered TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // Sessions table
+    await exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            refresh_token TEXT,
+            device_info TEXT,
+            ip_address TEXT,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // Create indexes
+    await exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+    await exec('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
+    await exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+}
+
+/**
+ * SQLite table setup (for local development)
+ */
+async function setupSqliteTables() {
     // Users table
     exec(`
         CREATE TABLE IF NOT EXISTS users (
@@ -223,20 +383,63 @@ function setupTables() {
     exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
     exec('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
     exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+}
 
-    console.log('[Database] Tables created successfully');
+/**
+ * Get database type being used
+ */
+function getDatabaseType() {
+    return USE_POSTGRES ? 'PostgreSQL' : 'SQLite';
+}
+
+/**
+ * Convert SQL with ? placeholders to $1, $2, etc. for PostgreSQL
+ */
+function convertPlaceholders(sql) {
+    if (!USE_POSTGRES) return sql;
+
+    let index = 0;
+    return sql.replace(/\?/g, () => `$${++index}`);
+}
+
+/**
+ * Run query with automatic placeholder conversion
+ */
+async function query(sql, params = []) {
+    const convertedSql = convertPlaceholders(sql);
+    return run(convertedSql, params);
+}
+
+/**
+ * Get single row with automatic placeholder conversion
+ */
+async function getOne(sql, params = []) {
+    const convertedSql = convertPlaceholders(sql);
+    return get(convertedSql, params);
+}
+
+/**
+ * Get all rows with automatic placeholder conversion
+ */
+async function getAll(sql, params = []) {
+    const convertedSql = convertPlaceholders(sql);
+    return all(convertedSql, params);
 }
 
 module.exports = {
     initDatabase,
-    getDb,
     run,
     get,
     all,
     exec,
-    saveDatabase,
+    query,
+    getOne,
+    getAll,
     testConnection,
     isInitialized,
     setupTables,
+    getDatabaseType,
+    convertPlaceholders,
+    USE_POSTGRES,
     dbPath
 };

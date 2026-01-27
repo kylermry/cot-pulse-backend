@@ -1,6 +1,6 @@
 /**
  * User Model
- * COT Pulse Backend - sql.js Version
+ * COT Pulse Backend - PostgreSQL + SQLite compatible
  */
 
 const db = require('../db');
@@ -19,7 +19,7 @@ class User {
             const id = crypto.randomUUID();
             const now = new Date().toISOString();
 
-            db.run(`
+            await db.query(`
                 INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
             `, [id, email.toLowerCase().trim(), passwordHash, name, now, now]);
@@ -32,7 +32,7 @@ class User {
                 created_at: now
             };
         } catch (error) {
-            if (error.message && error.message.includes('UNIQUE constraint failed')) {
+            if (error.message && (error.message.includes('UNIQUE constraint failed') || error.message.includes('duplicate key'))) {
                 throw new Error('Email already exists');
             }
             throw error;
@@ -43,14 +43,14 @@ class User {
      * Find user by email
      */
     static async findByEmail(email) {
-        return db.get('SELECT * FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+        return await db.getOne('SELECT * FROM users WHERE email = ?', [email.toLowerCase().trim()]);
     }
 
     /**
      * Find user by ID
      */
     static async findById(userId) {
-        return db.get(`
+        return await db.getOne(`
             SELECT id, email, name, phone, phone_verified, email_verified,
                    subscription_tier, subscription_status, stripe_customer_id,
                    created_at, last_login
@@ -70,7 +70,7 @@ class User {
      */
     static async updatePhone(userId, phone) {
         const now = new Date().toISOString();
-        db.run(`
+        await db.query(`
             UPDATE users
             SET phone = ?, phone_verified = 0, updated_at = ?
             WHERE id = ?
@@ -84,7 +84,7 @@ class User {
      */
     static async markPhoneVerified(userId) {
         const now = new Date().toISOString();
-        db.run(`
+        await db.query(`
             UPDATE users
             SET phone_verified = 1, updated_at = ?
             WHERE id = ?
@@ -98,7 +98,7 @@ class User {
      */
     static async updateLastLogin(userId) {
         const now = new Date().toISOString();
-        db.run('UPDATE users SET last_login = ? WHERE id = ?', [now, userId]);
+        await db.query('UPDATE users SET last_login = ? WHERE id = ?', [now, userId]);
     }
 
     /**
@@ -106,16 +106,35 @@ class User {
      */
     static async updateSubscription(userId, tier, status = 'active') {
         const now = new Date().toISOString();
-        db.run(`
+        await db.query(`
             UPDATE users
             SET subscription_tier = ?, subscription_status = ?, updated_at = ?
             WHERE id = ?
         `, [tier, status, now, userId]);
 
-        return db.get(`
+        return await db.getOne(`
             SELECT id, email, subscription_tier, subscription_status
             FROM users WHERE id = ?
         `, [userId]);
+    }
+
+    /**
+     * Update Stripe customer ID
+     */
+    static async updateStripeCustomerId(userId, stripeCustomerId) {
+        const now = new Date().toISOString();
+        await db.query(`
+            UPDATE users
+            SET stripe_customer_id = ?, updated_at = ?
+            WHERE id = ?
+        `, [stripeCustomerId, now, userId]);
+    }
+
+    /**
+     * Find user by Stripe customer ID
+     */
+    static async findByStripeCustomerId(stripeCustomerId) {
+        return await db.getOne('SELECT * FROM users WHERE stripe_customer_id = ?', [stripeCustomerId]);
     }
 
     /**
@@ -143,7 +162,9 @@ class User {
         values.push(now);
         values.push(userId);
 
-        db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
+        // Build the SQL with correct placeholders
+        let sql = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
+        await db.query(sql, values);
 
         return this.findById(userId);
     }
@@ -152,7 +173,7 @@ class User {
      * Delete user account
      */
     static async delete(userId) {
-        db.run('DELETE FROM users WHERE id = ?', [userId]);
+        await db.query('DELETE FROM users WHERE id = ?', [userId]);
     }
 }
 

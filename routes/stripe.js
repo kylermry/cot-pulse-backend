@@ -66,10 +66,7 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
             customerId = customer.id;
 
             // Save customer ID to user
-            db.run(
-                'UPDATE users SET stripe_customer_id = ?, updated_at = ? WHERE id = ?',
-                [customerId, new Date().toISOString(), userId]
-            );
+            await User.updateStripeCustomerId(userId, customerId);
         }
 
         // Create checkout session
@@ -254,16 +251,8 @@ async function handleCheckoutComplete(session) {
 
     if (userId) {
         // Update user subscription
-        const now = new Date().toISOString();
-        db.run(
-            `UPDATE users
-             SET subscription_tier = 'pro',
-                 subscription_status = 'active',
-                 stripe_customer_id = ?,
-                 updated_at = ?
-             WHERE id = ?`,
-            [session.customer, now, userId]
-        );
+        await User.updateSubscription(userId, 'pro', 'active');
+        await User.updateStripeCustomerId(userId, session.customer);
         console.log(`[Stripe] User ${userId} upgraded to Pro`);
     } else {
         console.warn('[Stripe] No userId in session metadata');
@@ -282,18 +271,10 @@ async function handleSubscriptionUpdate(subscription) {
         return;
     }
 
-    const now = new Date().toISOString();
     const tier = (status === 'active' || status === 'trialing') ? 'pro' : 'free';
     const subStatus = status === 'active' ? 'active' : status;
 
-    db.run(
-        `UPDATE users
-         SET subscription_tier = ?,
-             subscription_status = ?,
-             updated_at = ?
-         WHERE id = ?`,
-        [tier, subStatus, now, userId]
-    );
+    await User.updateSubscription(userId, tier, subStatus);
 
     console.log(`[Stripe] Subscription updated for user ${userId}: ${tier} (${subStatus})`);
 }
@@ -302,37 +283,21 @@ async function handleSubscriptionUpdate(subscription) {
  * Handle subscription cancellation
  */
 async function handleSubscriptionCanceled(subscription) {
-    const userId = subscription.metadata?.userId;
+    let userId = subscription.metadata?.userId;
 
     if (!userId) {
         // Try to find user by Stripe customer ID
         const customerId = subscription.customer;
-        const user = db.get('SELECT id FROM users WHERE stripe_customer_id = ?', [customerId]);
+        const user = await User.findByStripeCustomerId(customerId);
         if (user) {
-            const now = new Date().toISOString();
-            db.run(
-                `UPDATE users
-                 SET subscription_tier = 'free',
-                     subscription_status = 'canceled',
-                     updated_at = ?
-                 WHERE id = ?`,
-                [now, user.id]
-            );
-            console.log(`[Stripe] Subscription canceled for user ${user.id}`);
+            userId = user.id;
+        } else {
+            console.warn('[Stripe] Could not find user for canceled subscription');
+            return;
         }
-        return;
     }
 
-    const now = new Date().toISOString();
-    db.run(
-        `UPDATE users
-         SET subscription_tier = 'free',
-             subscription_status = 'canceled',
-             updated_at = ?
-         WHERE id = ?`,
-        [now, userId]
-    );
-
+    await User.updateSubscription(userId, 'free', 'canceled');
     console.log(`[Stripe] Subscription canceled for user ${userId}`);
 }
 
@@ -342,7 +307,7 @@ async function handleSubscriptionCanceled(subscription) {
 async function handlePaymentFailed(invoice) {
     const customerId = invoice.customer;
 
-    const user = db.get('SELECT id, email FROM users WHERE stripe_customer_id = ?', [customerId]);
+    const user = await User.findByStripeCustomerId(customerId);
     if (user) {
         console.log(`[Stripe] Payment failed for user ${user.email}`);
         // Could send email notification here

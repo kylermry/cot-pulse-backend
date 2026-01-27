@@ -11,7 +11,7 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const stripeRoutes = require('./routes/stripe');
 const { handleWebhook } = require('./routes/stripe');
-const { initDatabase, testConnection, isInitialized, setupTables } = require('./db');
+const { initDatabase, testConnection, isInitialized, setupTables, getDatabaseType } = require('./db');
 
 const app = express();
 
@@ -144,6 +144,7 @@ async function startServer() {
         setupTables();
     }
 
+    const dbType = getDatabaseType();
     app.listen(PORT, () => {
         console.log(`
 ╔═══════════════════════════════════════════════════════╗
@@ -153,7 +154,7 @@ async function startServer() {
 ║   📊  Port: ${PORT}                                     ║
 ║   🌍  Environment: ${(process.env.NODE_ENV || 'development').padEnd(27)}║
 ║   🔗  Frontend URL: ${(process.env.FRONTEND_URL || 'http://localhost:3000').substring(0, 24).padEnd(24)}║
-║   💾  Database: ${dbConnected ? 'Connected ✓' : 'Not Connected ✗'}                    ║
+║   💾  Database: ${(dbType + (dbConnected ? ' ✓' : ' ✗')).padEnd(25)}║
 ║                                                       ║
 ║   ⏰  Started: ${new Date().toLocaleString().padEnd(31)}║
 ║                                                       ║
