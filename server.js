@@ -17,8 +17,27 @@ const app = express();
 // MIDDLEWARE
 // ============================================
 
-// CORS configuration - allow all origins for development
-app.use(cors());
+// CORS configuration - allow specific origins
+const allowedOrigins = [
+    'https://cotpulse.com',
+    'https://www.cotpulse.com',
+    process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+    origin: function(origin, callback) {
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.log(`CORS blocked origin: ${origin}`);
+            callback(null, false);
+        }
+    },
+    credentials: true
+}));
 
 // Body parsing
 app.use(express.json());
