@@ -208,181 +208,215 @@ async function isInitialized() {
  * Setup database tables
  */
 async function setupTables() {
-    console.log('[Database] Setting up tables...');
+    console.log(`[Database] Setting up tables for ${getDatabaseType()}...`);
 
-    if (USE_POSTGRES) {
-        await setupPostgresTables();
-    } else {
-        await setupSqliteTables();
+    try {
+        if (USE_POSTGRES) {
+            await setupPostgresTables();
+        } else {
+            await setupSqliteTables();
+        }
+        console.log('[Database] All tables created successfully');
+    } catch (error) {
+        console.error('[Database] Failed to create tables:', error);
+        throw error;
     }
-
-    console.log('[Database] Tables created successfully');
 }
 
 /**
  * PostgreSQL table setup
  */
 async function setupPostgresTables() {
-    // Users table
-    await exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            name TEXT,
-            phone TEXT,
-            phone_verified INTEGER DEFAULT 0,
-            email_verified INTEGER DEFAULT 0,
-            subscription_tier TEXT DEFAULT 'free',
-            subscription_status TEXT DEFAULT 'active',
-            stripe_customer_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
-        )
-    `);
+    try {
+        // Users table
+        console.log('[Database] Creating users table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT,
+                phone TEXT,
+                phone_verified INTEGER DEFAULT 0,
+                email_verified INTEGER DEFAULT 0,
+                subscription_tier TEXT DEFAULT 'free',
+                subscription_status TEXT DEFAULT 'active',
+                stripe_customer_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP
+            )
+        `);
+        console.log('[Database] Users table created');
 
-    // Phone verification attempts table
-    await exec(`
-        CREATE TABLE IF NOT EXISTS phone_verification_attempts (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            phone TEXT NOT NULL,
-            code TEXT,
-            verified INTEGER DEFAULT 0,
-            expires_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+        // Phone verification attempts table
+        console.log('[Database] Creating phone_verification_attempts table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS phone_verification_attempts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                phone TEXT NOT NULL,
+                code TEXT,
+                verified INTEGER DEFAULT 0,
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Phone verification table created');
 
-    // User watchlist table
-    await exec(`
-        CREATE TABLE IF NOT EXISTS user_watchlist (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            symbol TEXT NOT NULL,
-            name TEXT,
-            category TEXT,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, symbol)
-        )
-    `);
+        // User watchlist table
+        console.log('[Database] Creating user_watchlist table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS user_watchlist (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                symbol TEXT NOT NULL,
+                name TEXT,
+                category TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, symbol)
+            )
+        `);
+        console.log('[Database] Watchlist table created');
 
-    // User alerts table
-    await exec(`
-        CREATE TABLE IF NOT EXISTS user_alerts (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            symbol TEXT NOT NULL,
-            alert_type TEXT NOT NULL,
-            threshold_value REAL,
-            threshold_direction TEXT,
-            is_active INTEGER DEFAULT 1,
-            last_triggered TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+        // User alerts table
+        console.log('[Database] Creating user_alerts table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS user_alerts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                symbol TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                threshold_value REAL,
+                threshold_direction TEXT,
+                is_active INTEGER DEFAULT 1,
+                last_triggered TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Alerts table created');
 
-    // Sessions table
-    await exec(`
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            refresh_token TEXT,
-            device_info TEXT,
-            ip_address TEXT,
-            expires_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+        // Sessions table
+        console.log('[Database] Creating sessions table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                refresh_token TEXT,
+                device_info TEXT,
+                ip_address TEXT,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Sessions table created');
 
-    // Create indexes
-    await exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
-    await exec('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
-    await exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+        // Create indexes
+        console.log('[Database] Creating indexes...');
+        await exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+        await exec('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
+        await exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+        console.log('[Database] Indexes created');
+
+    } catch (error) {
+        console.error('[Database] Error creating PostgreSQL tables:', error);
+        throw error;
+    }
 }
 
 /**
  * SQLite table setup (for local development)
  */
 async function setupSqliteTables() {
-    // Users table
-    exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            name TEXT,
-            phone TEXT,
-            phone_verified INTEGER DEFAULT 0,
-            email_verified INTEGER DEFAULT 0,
-            subscription_tier TEXT DEFAULT 'free',
-            subscription_status TEXT DEFAULT 'active',
-            stripe_customer_id TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            last_login TEXT
-        )
-    `);
+    try {
+        console.log('[Database] Creating users table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT,
+                phone TEXT,
+                phone_verified INTEGER DEFAULT 0,
+                email_verified INTEGER DEFAULT 0,
+                subscription_tier TEXT DEFAULT 'free',
+                subscription_status TEXT DEFAULT 'active',
+                stripe_customer_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_login TEXT
+            )
+        `);
+        console.log('[Database] Users table created');
 
-    // Phone verification attempts table
-    exec(`
-        CREATE TABLE IF NOT EXISTS phone_verification_attempts (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            phone TEXT NOT NULL,
-            code TEXT,
-            verified INTEGER DEFAULT 0,
-            expires_at TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+        console.log('[Database] Creating phone_verification_attempts table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS phone_verification_attempts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                phone TEXT NOT NULL,
+                code TEXT,
+                verified INTEGER DEFAULT 0,
+                expires_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Phone verification table created');
 
-    // User watchlist table
-    exec(`
-        CREATE TABLE IF NOT EXISTS user_watchlist (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            symbol TEXT NOT NULL,
-            name TEXT,
-            category TEXT,
-            added_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, symbol)
-        )
-    `);
+        console.log('[Database] Creating user_watchlist table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS user_watchlist (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                symbol TEXT NOT NULL,
+                name TEXT,
+                category TEXT,
+                added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, symbol)
+            )
+        `);
+        console.log('[Database] Watchlist table created');
 
-    // User alerts table
-    exec(`
-        CREATE TABLE IF NOT EXISTS user_alerts (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            symbol TEXT NOT NULL,
-            alert_type TEXT NOT NULL,
-            threshold_value REAL,
-            threshold_direction TEXT,
-            is_active INTEGER DEFAULT 1,
-            last_triggered TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+        console.log('[Database] Creating user_alerts table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS user_alerts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                symbol TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                threshold_value REAL,
+                threshold_direction TEXT,
+                is_active INTEGER DEFAULT 1,
+                last_triggered TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Alerts table created');
 
-    // Sessions table
-    exec(`
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-            refresh_token TEXT,
-            device_info TEXT,
-            ip_address TEXT,
-            expires_at TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
+        console.log('[Database] Creating sessions table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                refresh_token TEXT,
+                device_info TEXT,
+                ip_address TEXT,
+                expires_at TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Sessions table created');
 
-    // Create indexes
-    exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
-    exec('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
-    exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+        console.log('[Database] Creating indexes...');
+        await exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+        await exec('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
+        await exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+        console.log('[Database] Indexes created');
+
+    } catch (error) {
+        console.error('[Database] Error creating SQLite tables:', error);
+        throw error;
+    }
 }
 
 /**
