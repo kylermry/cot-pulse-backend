@@ -9,6 +9,8 @@ const bodyParser = require('body-parser');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
+const stripeRoutes = require('./routes/stripe');
+const { handleWebhook } = require('./routes/stripe');
 const { initDatabase, testConnection, isInitialized, setupTables } = require('./db');
 
 const app = express();
@@ -39,7 +41,10 @@ app.use(cors({
     credentials: true
 }));
 
-// Body parsing
+// Stripe webhook endpoint - must use raw body (before json middleware)
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+
+// Body parsing (after webhook route)
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -73,11 +78,14 @@ app.get('/api', (req, res) => {
             auth: {
                 signup: 'POST /api/auth/signup',
                 login: 'POST /api/auth/login',
-                verifyPhone: 'POST /api/auth/verify-phone',
-                resendCode: 'POST /api/auth/resend-code',
-                updatePhone: 'POST /api/auth/update-phone',
                 me: 'GET /api/auth/me',
                 logout: 'POST /api/auth/logout'
+            },
+            stripe: {
+                createCheckout: 'POST /api/stripe/create-checkout-session',
+                getSession: 'GET /api/stripe/session/:sessionId',
+                createPortal: 'POST /api/stripe/create-portal-session',
+                webhook: 'POST /api/stripe/webhook'
             }
         }
     });
@@ -85,6 +93,9 @@ app.get('/api', (req, res) => {
 
 // Authentication routes
 app.use('/api/auth', authRoutes);
+
+// Stripe routes (checkout, portal - webhook is registered above)
+app.use('/api/stripe', stripeRoutes);
 
 // ============================================
 // ERROR HANDLING
@@ -149,13 +160,13 @@ async function startServer() {
 ╚═══════════════════════════════════════════════════════╝
 
 📋 Available Endpoints:
-   GET  /health              - Health check
-   GET  /api                 - API info
-   POST /api/auth/signup     - Create account
-   POST /api/auth/login      - Login
-   POST /api/auth/verify-phone - Verify phone
-   POST /api/auth/resend-code  - Resend code
-   GET  /api/auth/me         - Get profile
+   GET  /health                          - Health check
+   GET  /api                             - API info
+   POST /api/auth/signup                 - Create account
+   POST /api/auth/login                  - Login
+   GET  /api/auth/me                     - Get profile
+   POST /api/stripe/create-checkout-session - Create checkout
+   POST /api/stripe/webhook              - Stripe webhook
         `);
     });
 }
