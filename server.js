@@ -24,6 +24,8 @@ const app = express();
 const allowedOrigins = [
     'https://cotpulse.com',
     'https://www.cotpulse.com',
+    'http://localhost:3000',
+    'http://localhost:5173',
     process.env.FRONTEND_URL
 ].filter(Boolean);
 
