@@ -311,6 +311,18 @@ async function setupPostgresTables() {
         `);
         console.log('[Database] Sessions table created');
 
+        // Password reset tokens table
+        console.log('[Database] Creating password_reset_tokens table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Password reset tokens table created');
+
         // Create indexes
         console.log('[Database] Creating indexes...');
         await exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
@@ -406,6 +418,17 @@ async function setupSqliteTables() {
             )
         `);
         console.log('[Database] Sessions table created');
+
+        console.log('[Database] Creating password_reset_tokens table...');
+        await exec(`
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('[Database] Password reset tokens table created');
 
         console.log('[Database] Creating indexes...');
         await exec('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');

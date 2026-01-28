@@ -9,6 +9,7 @@ const bodyParser = require('body-parser');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
+const passwordResetRoutes = require('./routes/passwordReset');
 const stripeRoutes = require('./routes/stripe');
 const { handleWebhook } = require('./routes/stripe');
 const { initDatabase, testConnection, isInitialized, setupTables, getDatabaseType } = require('./db');
@@ -79,7 +80,10 @@ app.get('/api', (req, res) => {
                 signup: 'POST /api/auth/signup',
                 login: 'POST /api/auth/login',
                 me: 'GET /api/auth/me',
-                logout: 'POST /api/auth/logout'
+                logout: 'POST /api/auth/logout',
+                forgotPassword: 'POST /api/auth/forgot-password',
+                resetPassword: 'POST /api/auth/reset-password',
+                verifyResetToken: 'GET /api/auth/verify-reset-token'
             },
             stripe: {
                 createCheckout: 'POST /api/stripe/create-checkout-session',
@@ -93,6 +97,9 @@ app.get('/api', (req, res) => {
 
 // Authentication routes
 app.use('/api/auth', authRoutes);
+
+// Password reset routes
+app.use('/api/auth', passwordResetRoutes);
 
 // Stripe routes (checkout, portal - webhook is registered above)
 app.use('/api/stripe', stripeRoutes);
@@ -170,6 +177,8 @@ async function startServer() {
    POST /api/auth/signup                 - Create account
    POST /api/auth/login                  - Login
    GET  /api/auth/me                     - Get profile
+   POST /api/auth/forgot-password        - Request password reset
+   POST /api/auth/reset-password         - Reset password with token
    POST /api/stripe/create-checkout-session - Create checkout
    POST /api/stripe/webhook              - Stripe webhook
         `);

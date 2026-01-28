@@ -8,6 +8,7 @@ const Stripe = require('stripe');
 const { authenticateToken } = require('./auth');
 const User = require('../models/User');
 const db = require('../db');
+const { sendSubscriptionEmail } = require('../utils/email');
 
 const router = express.Router();
 
@@ -254,6 +255,16 @@ async function handleCheckoutComplete(session) {
         await User.updateSubscription(userId, 'pro', 'active');
         await User.updateStripeCustomerId(userId, session.customer);
         console.log(`[Stripe] User ${userId} upgraded to Pro`);
+
+        // Get user details for email
+        const user = await User.findById(userId);
+
+        // Send subscription confirmation email (non-blocking)
+        if (userEmail) {
+            sendSubscriptionEmail(userEmail, user?.name, 'pro').catch(err => {
+                console.error('[Stripe] Failed to send subscription email:', err);
+            });
+        }
     } else {
         console.warn('[Stripe] No userId in session metadata');
     }

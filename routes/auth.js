@@ -6,6 +6,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { sendWelcomeEmail } = require('../utils/email');
 
 const router = express.Router();
 
@@ -82,6 +83,11 @@ router.post('/signup', async (req, res) => {
         // Create user
         const user = await User.create({ email, password, name });
         console.log(`[Auth] User created: ${user.email}`);
+
+        // Send welcome email (non-blocking)
+        sendWelcomeEmail(user.email, user.name).catch(err => {
+            console.error('[Auth] Failed to send welcome email:', err);
+        });
 
         // Generate JWT
         const token = jwt.sign(

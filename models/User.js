@@ -175,6 +175,19 @@ class User {
     static async delete(userId) {
         await db.query('DELETE FROM users WHERE id = ?', [userId]);
     }
+
+    /**
+     * Update user password
+     */
+    static async updatePassword(userId, newPassword) {
+        const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+        const now = new Date().toISOString();
+        await db.query(`
+            UPDATE users
+            SET password_hash = ?, updated_at = ?
+            WHERE id = ?
+        `, [passwordHash, now, userId]);
+    }
 }
 
 module.exports = User;
