@@ -147,15 +147,10 @@ async function startServer() {
         process.exit(1);
     }
 
-    // Auto-setup database tables if they don't exist
-    const tablesExist = await isInitialized();
-    console.log(`[Server] Tables exist: ${tablesExist}`);
-
-    if (!tablesExist) {
-        console.log('[Server] Database tables not found, initializing...');
-        await setupTables();
-        console.log('[Server] Database tables initialized successfully');
-    }
+    // Always ensure all tables exist (CREATE TABLE IF NOT EXISTS is safe to re-run)
+    console.log('[Server] Ensuring all database tables exist...');
+    await setupTables();
+    console.log('[Server] Database tables verified');
 
     const dbType = getDatabaseType();
     app.listen(PORT, () => {
